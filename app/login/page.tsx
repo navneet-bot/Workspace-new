@@ -1,0 +1,192 @@
+"use client";
+
+import { signIn, getSession } from "next-auth/react";
+import { useState, Suspense, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { ErrorAlert } from "@/components/ui/ErrorAlert";
+
+function LoginForm() {
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const queryError = searchParams.get("error");
+
+    if (queryError) {
+      const timer = setTimeout(() => {
+        setError(queryError);
+      }, 0);
+
+      return () => clearTimeout(timer);
+    }
+  }, [searchParams]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    console.log("Login button clicked");
+
+    setError("");
+    setIsLoading(true);
+
+    try {
+      console.log("Submitting credentials");
+
+      const callbackUrl =
+        searchParams.get("callbackUrl") || "/dashboard";
+
+      const result = await signIn("credentials", {
+        redirect: false,
+        identifier,
+        password,
+        callbackUrl,
+      });
+
+      console.log("SignIn Result:", result);
+
+      if (result?.error) {
+        if (
+          result.error === "CredentialsSignin" ||
+          result.error === "AccessDenied"
+        ) {
+          console.log("Login failed:", result.error);
+        } else {
+          console.error("Login Error:", result.error);
+        }
+
+        const errorMessages: Record<string, string> = {
+          CredentialsSignin: "Invalid User ID or Password.",
+          AccessDenied: "Access denied.",
+          Configuration: "Authentication service unavailable.",
+        };
+
+        setError(
+          errorMessages[result.error] ??
+            "Unable to sign in. Please try again."
+        );
+
+        setIsLoading(false);
+        return;
+      }
+
+      if (result?.ok) {
+        const session = await getSession();
+
+        console.log("Session:", session);
+
+        router.refresh();
+        window.location.href = "/dashboard";
+      }
+    } catch (error) {
+      console.error(error);
+
+      setError("Unexpected error occurred");
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div id="loginPage">
+      <div className="login-bg" />
+      <div className="login-grid" />
+
+      <div className="login-card">
+        <div className="login-logo">
+          <div className="login-logo-icon">JJ</div>
+
+          <span>
+            Job <em>Jockey</em>
+          </span>
+        </div>
+
+        <h2>Welcome back</h2>
+
+        <p>Sign in to your account</p>
+
+        <form onSubmit={handleLogin}>
+          <ErrorAlert error={error} />
+
+          <div className="field-group">
+            <label>User ID</label>
+
+            <input
+              type="text"
+              required
+              placeholder="Enter your JobJockey User ID"
+              value={identifier}
+              onChange={(e) =>
+                setIdentifier(e.target.value)
+              }
+            />
+          </div>
+
+          <div className="field-group">
+            <label>Password</label>
+
+            <input
+              type="password"
+              required
+              placeholder="Enter your password"
+              value={password}
+              onChange={(e) =>
+                setPassword(e.target.value)
+              }
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isLoading}
+            className="btn-primary"
+          >
+            {isLoading
+              ? "Signing in..."
+              : "Sign In →"}
+          </button>
+
+          {/* Forgot Password */}
+          <div
+            style={{
+              textAlign: "center",
+              marginTop: "14px",
+            }}
+          >
+            <Link
+              href="/forgot-password"
+              style={{
+                color: "#f59e0b",
+                textDecoration: "none",
+                fontSize: "14px",
+                fontWeight: 500,
+              }}
+            >
+              Forgot Password?
+            </Link>
+          </div>
+
+          <p className="domain-note">
+            Use your{" "}
+            <span>JobJockey User ID</span> to sign in
+          </p>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-jj-bg" />
+      }
+    >
+      <LoginForm />
+    </Suspense>
+  );
+}

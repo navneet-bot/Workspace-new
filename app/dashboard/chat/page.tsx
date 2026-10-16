@@ -1,0 +1,111 @@
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth";
+import prisma from "@/lib/db";
+import { redirect } from "next/navigation";
+import { ChatView } from "@/components/features/chat/ChatView";
+
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ select?: string }> | { select?: string };
+}) {
+  const session = await getServerSession(authOptions);
+  
+  if (!session?.user?.email) {
+    redirect("/login");
+  }
+
+  const resolvedParams = await searchParams;
+  const select = resolvedParams?.select || null;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const todayStr = `${year}-${month}-${day}`;
+
+  const [currentUser, users, allGroups, todayAttendance, todayWorkLogs] = await Promise.all([
+    prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true, name: true, email: true, role: true }
+    }).catch(() => null),
+    prisma.user.findMany({
+      select: { id: true, name: true, email: true, role: true },
+      orderBy: { name: "asc" }
+    }).catch(() => []),
+    prisma.group.findMany({
+      select: { id: true, name: true, description: true, icon: true, members: true, createdBy: true, createdAt: true },
+      orderBy: { name: "asc" }
+    }).catch(() => []),
+    prisma.attendance.findMany({
+      where: { date: todayStr },
+      select: { email: true, status: true }
+    }).catch(() => []),
+    prisma.workLog.findMany({
+      where: { date: todayStr },
+      select: { email: true }
+    }).catch(() => []),
+  ]);
+
+  if (!currentUser) {
+    redirect("/login");
+  }
+
+  // Only show groups where the current user is a member
+  const groups = allGroups.filter(g => {
+    try {
+      const members: string[] = JSON.parse(g.members || "[]");
+      return members.includes(currentUser.email);
+    } catch {
+      return false;
+    }
+  });
+
+  // Serialize group dates and convert structure
+  const serializedGroups = groups.map(g => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    icon: g.icon,
+    members: g.members,
+    createdBy: g.createdBy,
+    createdAt: g.createdAt.toISOString()
+  }));
+
+  const activeEmailsSet = new Set<string>();
+
+  // Admins and super admins are always active
+  users.forEach(u => {
+    if (u.role === "admin" || u.role === "super_admin") {
+      activeEmailsSet.add(u.email);
+    }
+  });
+
+  // Users marked Present today are active
+  todayAttendance.forEach(a => {
+    if (a.status === "Present" && a.email) {
+      activeEmailsSet.add(a.email);
+    }
+  });
+
+  // Users with a work log today are active
+  todayWorkLogs.forEach(wl => {
+    if (wl.email) {
+      activeEmailsSet.add(wl.email);
+    }
+  });
+
+  const activeUserEmails = Array.from(activeEmailsSet);
+
+  return (
+    <div className="h-full">
+      <ChatView 
+        currentUser={{ id: currentUser.id, role: currentUser.role, email: currentUser.email }} 
+        users={users} 
+        groups={serializedGroups}
+        initialSelectedContactId={select}
+        activeUserEmails={activeUserEmails}
+      />
+    </div>
+  );
+}
